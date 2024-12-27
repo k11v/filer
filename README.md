@@ -1,6 +1,6 @@
 # Filer
 
-Filer is a lightweight tool that enables file downloads and uploads files over a network.
+Filer is a lightweight tool that enables file downloads and uploads over a network.
 
 ## Usage
 
