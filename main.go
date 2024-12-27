@@ -8,7 +8,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -41,24 +43,60 @@ func main() {
 		_, _ = w.Write(uploadHTML)
 	})
 	mux.HandleFunc("POST /upload", func(w http.ResponseWriter, r *http.Request) {
-		srcFile, fileHeader, err := r.FormFile("file")
+		mr, err := r.MultipartReader()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			slog.Error("client error", "err", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		for {
+			part, err := mr.NextPart()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				slog.Error("client error", "err", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if part.FormName() != "file" {
+				err = errors.New("not file form value")
+				slog.Error("client error", "err", err.Error())
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if part.FileName() == "" {
+				err = errors.New("empty file form value file name")
+				slog.Error("client error", "err", err.Error())
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 
-		dstFile, err := os.Create(fileHeader.Filename)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			file, err := os.Create(part.FileName())
+			if err != nil {
+				slog.Error("server error", "err", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			size := int64(0)
+			chunkSize := int64(20 * 1024 * 1024)
+			slog.Info("start reading", "size", size)
+			for {
+				s, err := io.CopyN(file, part, chunkSize)
+				size += s
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					slog.Error("server error", "err", err)
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				slog.Info("read chunk", "size", size, "chunk_size", chunkSize)
+			}
+			slog.Info("finished reading", "size", size)
 		}
-
-		_, err = io.Copy(dstFile, srcFile)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
 		w.WriteHeader(http.StatusNoContent)
 	})
 
