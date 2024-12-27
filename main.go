@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -116,9 +118,18 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	slog.Info("generated certificate", "fingerprint_sha256", certificateFingerprintSHA256(tlsConfig.Certificates[0]))
 	tlsListener := tls.NewListener(tcpListener, &tlsConfig)
 
-	http.Serve(tlsListener, mux)
+	err = http.Serve(tlsListener, mux)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		panic(err)
+	}
+}
+
+func certificateFingerprintSHA256(cert tls.Certificate) string {
+	fingerprint := sha256.Sum256(cert.Leaf.Raw)
+	return hex.EncodeToString(fingerprint[:])
 }
 
 func newCertificate(hosts []string) (certPEMBlock []byte, keyPEMBlock []byte, err error) {
