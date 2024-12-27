@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -70,7 +69,7 @@ func main() {
 
 	tlsConfig := tls.Config{}
 	tlsConfig.NextProtos = []string{"http/1.1"}
-	certPEMBlock, keyPEMBlock, err := newCertificate()
+	certPEMBlock, keyPEMBlock, err := newCertificate(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -84,11 +83,17 @@ func main() {
 	http.Serve(tlsListener, mux)
 }
 
-func newCertificate() (certPEMBlock []byte, keyPEMBlock []byte, err error) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+func newCertificate(hosts []string) (certPEMBlock []byte, keyPEMBlock []byte, err error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, err
 	}
+	pub := &priv.PublicKey
+
+	// RSA subject keys should have the DigitalSignature and KeyEncipherment
+	// KeyUsage bits set in the x509.Certificate template.
+	keyUsage := x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+	extKeyUsage := []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
 
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
@@ -106,14 +111,11 @@ func newCertificate() (certPEMBlock []byte, keyPEMBlock []byte, err error) {
 		},
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		KeyUsage:              keyUsage,
+		ExtKeyUsage:           extKeyUsage,
 		BasicConstraintsValid: true,
 	}
 
-	host := new(string)
-	*host = "localhost"
-	hosts := strings.Split(*host, ",")
 	for _, h := range hosts {
 		if ip := net.ParseIP(h); ip != nil {
 			template.IPAddresses = append(template.IPAddresses, ip)
